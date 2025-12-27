@@ -1,10 +1,16 @@
 import streamlit as st
 import os
 import time
-import librosa
 import requests
-import matplotlib.pyplot as plt
 import numpy as np
+
+# --- CRITICAL FIX FOR CLOUD DEPLOYMENT ---
+import matplotlib
+matplotlib.use('Agg')  # Must be before importing pyplot
+import matplotlib.pyplot as plt
+# -----------------------------------------
+
+import librosa
 from remix_engine import start_remix_job, optimize_prompt_text
 
 # --- 1. PAGE CONFIGURATION ---
