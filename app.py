@@ -3,13 +3,6 @@ import os
 import time
 import requests
 import numpy as np
-
-# --- CRITICAL FIX FOR CLOUD DEPLOYMENT ---
-import matplotlib
-matplotlib.use('Agg')  # Must be before importing pyplot
-import matplotlib.pyplot as plt
-# -----------------------------------------
-
 import librosa
 from remix_engine import start_remix_job, optimize_prompt_text
 
@@ -73,23 +66,26 @@ if 'run_remix' not in st.session_state:
 
 # --- HELPERS ---
 def estimate_key(y, sr):
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-    chroma_sum = np.sum(chroma, axis=1)
-    major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-    minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-    keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-    max_corr = -1
-    best_key = "Unknown"
-    chroma_sum /= np.max(chroma_sum)
-    for i in range(12):
-        if np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1] > max_corr:
-            max_corr = np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1]
-            best_key = f"{keys[i]} Major"
-    for i in range(12):
-        if np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1] > max_corr:
-            max_corr = np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1]
-            best_key = f"{keys[i]} Minor"
-    return best_key
+    try:
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+        chroma_sum = np.sum(chroma, axis=1)
+        major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+        minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+        keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        max_corr = -1
+        best_key = "Unknown"
+        chroma_sum /= np.max(chroma_sum)
+        for i in range(12):
+            if np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1] > max_corr:
+                max_corr = np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1]
+                best_key = f"{keys[i]} Major"
+        for i in range(12):
+            if np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1] > max_corr:
+                max_corr = np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1]
+                best_key = f"{keys[i]} Minor"
+        return best_key
+    except:
+        return "Unknown"
 
 # --- POP-UP ---
 @st.dialog("✨ AI Prompt Optimizer")

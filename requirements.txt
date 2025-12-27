@@ -2,7 +2,6 @@ streamlit
 replicate
 python-dotenv
 requests
-matplotlib
 numpy==1.26.4
 librosa==0.10.2.post1
 scipy<1.14.0
