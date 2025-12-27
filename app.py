@@ -2,9 +2,6 @@ import streamlit as st
 import os
 import time
 import requests
-import numpy as np
-import librosa
-from remix_engine import start_remix_job, optimize_prompt_text
 
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(
@@ -14,58 +11,40 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. CUSTOM CSS (THE PROFESSIONAL LOOK) ---
+# --- 2. CUSTOM CSS ---
 st.markdown("""
 <style>
-    /* Main Background adjustments */
-    .stApp {
-        background-color: #0E1117;
-    }
-    
-    /* Metrics Styling */
-    [data-testid="stMetricValue"] {
-        font-size: 1.5rem !important;
-        color: #8A2BE2; /* Ghost Purple */
-    }
-    
-    /* Custom Button Styling */
+    .stApp { background-color: #0E1117; }
+    [data-testid="stMetricValue"] { font-size: 1.5rem !important; color: #8A2BE2; }
     div.stButton > button:first-child {
         background: linear-gradient(90deg, #8A2BE2 0%, #4B0082 100%);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: bold;
-        transition: 0.3s;
+        color: white; border: none; border-radius: 8px; font-weight: bold; transition: 0.3s;
     }
     div.stButton > button:first-child:hover {
         background: linear-gradient(90deg, #9B30FF 0%, #7B00FF 100%);
         box-shadow: 0px 4px 15px rgba(138, 43, 226, 0.4);
     }
-    
-    /* Ad Container Styling */
     .ad-box {
-        background-color: #1e1e1e;
-        border: 1px solid #333;
-        border-radius: 10px;
-        padding: 20px;
-        text-align: center;
-        margin-bottom: 20px;
-        color: #888;
-        font-size: 0.8rem;
+        background-color: #1e1e1e; border: 1px solid #333; border-radius: 10px;
+        padding: 20px; text-align: center; margin-bottom: 20px; color: #888; font-size: 0.8rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # --- SESSION STATE ---
-if 'history' not in st.session_state:
-    st.session_state.history = []
-if 'optimized_prompt' not in st.session_state:
-    st.session_state.optimized_prompt = ""
-if 'run_remix' not in st.session_state:
-    st.session_state.run_remix = False 
+if 'history' not in st.session_state: st.session_state.history = []
+if 'optimized_prompt' not in st.session_state: st.session_state.optimized_prompt = ""
+if 'run_remix' not in st.session_state: st.session_state.run_remix = False 
 
 # --- HELPERS ---
+def get_audio_tools():
+    """Lazy load heavy libraries only when needed"""
+    import librosa
+    import numpy as np
+    return librosa, np
+
 def estimate_key(y, sr):
+    librosa, np = get_audio_tools()
     try:
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         chroma_sum = np.sum(chroma, axis=1)
@@ -79,7 +58,6 @@ def estimate_key(y, sr):
             if np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1] > max_corr:
                 max_corr = np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1]
                 best_key = f"{keys[i]} Major"
-        for i in range(12):
             if np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1] > max_corr:
                 max_corr = np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1]
                 best_key = f"{keys[i]} Minor"
@@ -90,6 +68,9 @@ def estimate_key(y, sr):
 # --- POP-UP ---
 @st.dialog("✨ AI Prompt Optimizer")
 def open_optimizer_modal(original_text):
+    # Lazy load backend only when needed
+    from remix_engine import optimize_prompt_text
+    
     st.markdown("The AI suggests this improved prompt:")
     if not st.session_state.optimized_prompt:
         with st.spinner("Analyzing style..."):
@@ -125,39 +106,28 @@ with st.sidebar:
         temperature = st.slider("Creativity", 0.1, 2.0, 1.0)
         seed = st.text_input("Seed Number (Optional)")
 
-# --- MAIN LAYOUT (SPLIT 75% Content / 25% Ads) ---
+# --- MAIN LAYOUT ---
 col_main, col_ads = st.columns([3, 1])
 
-# --- RIGHT COLUMN: PARTNERS/ADS ---
 with col_ads:
     st.markdown("### 📢 Partners")
-    
-    # AD SLOT 1: DISTROKID (Placeholder)
     st.markdown("""
     <div class="ad-box">
         <h4>☁️ DistroKid</h4>
         <p>Upload your remixes to Spotify & Apple Music.</p>
         <button style='background:#444; border:none; padding:5px; color:white; border-radius:4px;'>Get 7% Off</button>
     </div>
-    """, unsafe_allow_html=True)
-    
-    # AD SLOT 2: SPLICE (Placeholder)
-    st.markdown("""
     <div class="ad-box">
         <h4>🎹 Splice Sounds</h4>
         <p>Millions of royalty-free samples & loops.</p>
         <button style='background:#444; border:none; padding:5px; color:white; border-radius:4px;'>Try Free</button>
     </div>
     """, unsafe_allow_html=True)
-    
-    st.info("💡 Want to advertise here? Contact us!")
 
-# --- LEFT COLUMN: MAIN APP ---
 with col_main:
     st.title("👻 Phantom Trax")
     st.caption("Professional AI Audio Remix Engine")
 
-    # File Upload Area
     uploaded_file = st.file_uploader("Drop your MP3 here", type=["mp3", "wav"])
 
     if uploaded_file is not None:
@@ -165,14 +135,15 @@ with col_main:
         with open(temp_filename, "wb") as f:
             f.write(uploaded_file.getbuffer())
         
-        # Dashboard Grid for Stats
         st.markdown("### 📊 Track Analysis")
         with st.container(border=True):
             col_stats, col_player = st.columns([2, 1])
-            
             with col_stats:
                 with st.spinner("Processing audio..."):
                     try:
+                        # LAZY LOAD HERE
+                        librosa, np = get_audio_tools()
+                        
                         y, sr = librosa.load(temp_filename, duration=60)
                         clean_duration = int(librosa.get_duration(y=y, sr=sr))
                         mins, secs = clean_duration // 60, clean_duration % 60
@@ -188,7 +159,6 @@ with col_main:
                         m1.metric("Duration", f"{mins}:{secs:02d}")
                         m2.metric("BPM", f"{bpm_val}")
                         m3.metric("Key", detected_key)
-                        
                     except Exception as e:
                         st.error(f"Analysis failed: {e}")
                         clean_duration = 30
@@ -197,16 +167,13 @@ with col_main:
                 st.write("**Preview Input:**")
                 st.audio(uploaded_file, format='audio/mp3')
 
-        # Prompt Input
         st.write("---")
         default_text = f"Remix {bpm_text} {key_text}, trap style, heavy 808"
         default_text = " ".join(default_text.split())
         style_prompt = st.text_input("Describe the new style", default_text)
 
-        # Generate Button (Full Width)
         generate_clicked = st.button("✨ Generate Remix", type="primary", use_container_width=True)
 
-        # Logic
         if generate_clicked:
             if use_optimizer:
                 st.session_state.optimized_prompt = "" 
@@ -216,6 +183,9 @@ with col_main:
                 st.session_state.optimized_prompt = style_prompt 
 
         if st.session_state.run_remix:
+            # Lazy load remix engine only when running
+            from remix_engine import start_remix_job
+            
             final_prompt = st.session_state.optimized_prompt if st.session_state.optimized_prompt else style_prompt
             st.session_state.run_remix = False 
             
@@ -242,12 +212,8 @@ with col_main:
                     status_text.success("✅ Remix Complete!")
                     progress_bar.progress(100)
                     remix_url = str(prediction.output)
-                    
                     st.session_state.history.insert(0, {
-                        "prompt": final_prompt,
-                        "url": remix_url,
-                        "time": time.strftime("%H:%M"),
-                        "seed": seed if seed else "Random"
+                        "prompt": final_prompt, "url": remix_url, "time": time.strftime("%H:%M"), "seed": seed if seed else "Random"
                     })
                     st.rerun()
                 else:
@@ -256,7 +222,6 @@ with col_main:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    # History List
     if st.session_state.history:
         st.write("### 📜 Session History")
         for item in st.session_state.history:
@@ -267,5 +232,5 @@ with col_main:
                     st.caption(f"🕒 {item['time']} | 🌱 Seed: {item['seed']}")
                     st.audio(item['url'])
                 with h_col2:
-                    st.markdown("<br>", unsafe_allow_html=True) # Spacer
+                    st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown(f"[⬇️ Download WAV]({item['url']})")
