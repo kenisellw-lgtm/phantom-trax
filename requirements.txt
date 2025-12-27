@@ -1,7 +1,7 @@
 streamlit
 replicate
 python-dotenv
-requests
 librosa
-numpy<2
+requests
 matplotlib
+numpy<2.0.0
