@@ -3,5 +3,5 @@ replicate
 python-dotenv
 requests
 librosa
-numpy
+numpy<2
 matplotlib
