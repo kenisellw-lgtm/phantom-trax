@@ -1,0 +1,7 @@
+streamlit
+replicate
+python-dotenv
+requests
+librosa
+numpy
+matplotlib
