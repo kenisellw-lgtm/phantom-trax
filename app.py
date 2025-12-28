@@ -1,236 +1,184 @@
 import streamlit as st
 import os
 import time
-import requests
+from dotenv import load_dotenv
 
-# --- 1. PAGE CONFIGURATION ---
+# --- CONFIGURATION MUST BE FIRST ---
 st.set_page_config(
-    page_title="Phantom Trax", 
-    page_icon="👻", 
+    page_title="Phantom Trax",
+    page_icon="👻",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 2. CUSTOM CSS ---
+# --- LOAD ENVIRONMENT VARIABLES ---
+load_dotenv()
+
+# --- 🔍 DEBUG SECTION (TEMPORARY) ---
+# This prints to the Logs (Streamlit "Manage App" or Render "Logs")
+token = os.getenv("REPLICATE_API_TOKEN")
+print("--- DEBUGGING API TOKEN ---")
+if token:
+    print(f"DEBUG: Token found!")
+    print(f"DEBUG: Length: {len(token)}")
+    print(f"DEBUG: First 4 chars: '{token[:4]}'") # Shows if there are quotes at start
+    print(f"DEBUG: Last 4 chars: '{token[-4:]}'") # Shows if there are spaces at end
+else:
+    print("DEBUG: ❌ NO TOKEN FOUND. The app cannot see the key.")
+print("---------------------------")
+# ------------------------------------
+
+# Import custom modules
+try:
+    from remix_engine import start_remix_job, optimize_prompt_text
+except ImportError:
+    st.error("CRITICAL ERROR: 'remix_engine.py' is missing. Please make sure it is in the same folder.")
+    st.stop()
+
+# --- CUSTOM CSS (STYLING) ---
 st.markdown("""
 <style>
-    .stApp { background-color: #0E1117; }
-    [data-testid="stMetricValue"] { font-size: 1.5rem !important; color: #8A2BE2; }
-    div.stButton > button:first-child {
-        background: linear-gradient(90deg, #8A2BE2 0%, #4B0082 100%);
-        color: white; border: none; border-radius: 8px; font-weight: bold; transition: 0.3s;
+    /* Global Styles */
+    .stApp {
+        background-color: #0E1117;
+        color: #FAFAFA;
     }
-    div.stButton > button:first-child:hover {
-        background: linear-gradient(90deg, #9B30FF 0%, #7B00FF 100%);
-        box-shadow: 0px 4px 15px rgba(138, 43, 226, 0.4);
+    
+    /* Headers */
+    h1, h2, h3 {
+        color: #bd1e59 !important; /* Phantom Pink */
+        font-family: 'Helvetica Neue', sans-serif;
+        font-weight: 700;
     }
-    .ad-box {
-        background-color: #1e1e1e; border: 1px solid #333; border-radius: 10px;
-        padding: 20px; text-align: center; margin-bottom: 20px; color: #888; font-size: 0.8rem;
+
+    /* Buttons */
+    .stButton>button {
+        color: white;
+        background-color: #bd1e59;
+        border-radius: 8px;
+        border: none;
+        padding: 10px 24px;
+        font-weight: bold;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #d63372;
+        box-shadow: 0 4px 12px rgba(189, 30, 89, 0.4);
+    }
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #161B22;
+        border-right: 1px solid #30363D;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- SESSION STATE ---
-if 'history' not in st.session_state: st.session_state.history = []
-if 'optimized_prompt' not in st.session_state: st.session_state.optimized_prompt = ""
-if 'run_remix' not in st.session_state: st.session_state.run_remix = False 
-
-# --- HELPERS ---
-def get_audio_tools():
-    """Lazy load heavy libraries only when needed"""
-    import librosa
-    import numpy as np
-    return librosa, np
-
-def estimate_key(y, sr):
-    librosa, np = get_audio_tools()
-    try:
-        chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-        chroma_sum = np.sum(chroma, axis=1)
-        major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-        minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-        keys = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        max_corr = -1
-        best_key = "Unknown"
-        chroma_sum /= np.max(chroma_sum)
-        for i in range(12):
-            if np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1] > max_corr:
-                max_corr = np.corrcoef(chroma_sum, np.roll(major_profile, i))[0, 1]
-                best_key = f"{keys[i]} Major"
-            if np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1] > max_corr:
-                max_corr = np.corrcoef(chroma_sum, np.roll(minor_profile, i))[0, 1]
-                best_key = f"{keys[i]} Minor"
-        return best_key
-    except:
-        return "Unknown"
-
-# --- POP-UP ---
-@st.dialog("✨ AI Prompt Optimizer")
-def open_optimizer_modal(original_text):
-    # Lazy load backend only when needed
-    from remix_engine import optimize_prompt_text
-    
-    st.markdown("The AI suggests this improved prompt:")
-    if not st.session_state.optimized_prompt:
-        with st.spinner("Analyzing style..."):
-            st.session_state.optimized_prompt = optimize_prompt_text(original_text)
-    
-    new_prompt = st.text_area("Optimized Prompt", value=st.session_state.optimized_prompt, height=120)
-    st.session_state.optimized_prompt = new_prompt 
-    
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
-        if st.button("✅ Accept", type="primary", use_container_width=True):
-            st.session_state.run_remix = True
-            st.rerun()
-    with c2:
-        if st.button("🎲 Retry", use_container_width=True):
-            st.session_state.optimized_prompt = "" 
-            st.rerun()
-    with c3:
-        if st.button("❌ Cancel", use_container_width=True):
-            st.session_state.run_remix = False
-            st.session_state.optimized_prompt = ""
-            st.rerun()
-
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("👻 Phantom Trax")
-    with st.expander("📊 Analysis Settings", expanded=True):
-        enable_bpm = st.toggle("Detect BPM", value=True)
-        enable_key = st.toggle("Detect Key", value=True)
+    st.caption("AI Audio Remix Engine")
+    st.divider()
     
-    with st.expander("🎛️ AI Settings", expanded=True):
-        use_optimizer = st.toggle("AI Prompt Optimizer", value=True)
-        temperature = st.slider("Creativity", 0.1, 2.0, 1.0)
-        seed = st.text_input("Seed Number (Optional)")
+    st.markdown("### 🎛️ Settings")
+    model_duration = st.slider("Duration (seconds)", 5, 30, 30)
+    creativity = st.slider("Creativity (Temperature)", 0.0, 1.5, 0.8)
+    
+    use_optimizer = st.toggle("✨ AI Prompt Optimizer", value=True, help="Uses Llama 3 to rewrite your prompt for better quality.")
+    
+    st.divider()
+    st.info("💡 **Tip:** Use headphones for best quality.")
+    st.markdown("---")
+    st.markdown("Build v2.0 | Powered by Meta MusicGen")
 
-# --- MAIN LAYOUT ---
-col_main, col_ads = st.columns([3, 1])
+# --- MAIN APP UI ---
+st.title("🎚️ Remix Your Reality")
+st.markdown("Turn any audio sample into a **Trap, Lo-Fi, or Techno banger** using AI.")
+
+col1, col2 = st.columns([1, 1], gap="large")
+
+with col1:
+    st.subheader("1. Upload Source")
+    uploaded_file = st.file_uploader("Drop a loop, voice memo, or song snippet", type=["mp3", "wav", "m4a"])
+    
+    if uploaded_file:
+        st.audio(uploaded_file, format='audio/wav')
+        # Save temp file
+        with open("temp_input.wav", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+with col2:
+    st.subheader("2. Describe the Vibe")
+    prompt_text = st.text_area("What should it sound like?", placeholder="e.g., Dark trap beat, 140bpm, heavy 808s, cinematic atmosphere...")
+    
+    generate_btn = st.button("🚀 Generate Remix", type="primary", use_container_width=True)
+
+# --- GENERATION LOGIC ---
+if generate_btn:
+    if not uploaded_file:
+        st.warning("⚠️ Please upload an audio file first.")
+    elif not prompt_text:
+        st.warning("⚠️ Please describe the style you want.")
+    else:
+        status_box = st.status("🎧 Processing Audio...", expanded=True)
+        
+        try:
+            # Step 1: Optimize Prompt (If enabled)
+            final_prompt = prompt_text
+            if use_optimizer:
+                status_box.write("🧠 AI Brain: Optimizing your prompt...")
+                final_prompt = optimize_prompt_text(prompt_text)
+                st.info(f"✨ **Optimized Prompt:** {final_prompt}")
+            
+            # Step 2: Send to MusicGen
+            status_box.write("📡 Uploading to GPU Cloud...")
+            prediction = start_remix_job(
+                "temp_input.wav",
+                final_prompt,
+                model_duration,
+                creativity
+            )
+            
+            status_box.write("🎵 Generating Audio (this takes ~30s)...")
+            
+            # Step 3: Poll for results
+            prediction.reload()
+            while prediction.status not in ["succeeded", "failed", "canceled"]:
+                time.sleep(2)
+                prediction.reload()
+
+            if prediction.status == "succeeded":
+                status_box.update(label="✅ Remix Complete!", state="complete", expanded=False)
+                output_url = prediction.output
+                
+                st.success("Your remix is ready!")
+                st.audio(output_url)
+                
+                # Download Button
+                st.link_button("⬇️ Download Remix", output_url)
+                
+            else:
+                status_box.update(label="❌ Generation Failed", state="error")
+                st.error(f"Error from AI: {prediction.error}")
+                print(f"DEBUG ERROR DETAILS: {prediction.error}")
+
+        except Exception as e:
+            status_box.update(label="❌ System Error", state="error")
+            st.error(f"An error occurred: {e}")
+            print(f"CRITICAL EXCEPTION: {e}")
+
+# --- AFFILIATE / ADS SECTION ---
+st.divider()
+col_ads, col_info = st.columns([2, 1])
 
 with col_ads:
-    st.markdown("### 📢 Partners")
+    st.markdown("### 🚀 Take Your Music Further")
+    st.markdown("Ready to release your tracks to Spotify & Apple Music?")
+    # Replace the link below with your actual Affiliate Link
     st.markdown("""
-    <div class="ad-box">
-        <h4>☁️ DistroKid</h4>
-        <p>Upload your remixes to Spotify & Apple Music.</p>
-        <button style='background:#444; border:none; padding:5px; color:white; border-radius:4px;'>Get 7% Off</button>
-    </div>
-    <div class="ad-box">
-        <h4>🎹 Splice Sounds</h4>
-        <p>Millions of royalty-free samples & loops.</p>
-        <button style='background:#444; border:none; padding:5px; color:white; border-radius:4px;'>Try Free</button>
-    </div>
+        <a href="https://distrokid.com/vip/seven/phantomtrax" target="_blank">
+            <button style='background:#FFD700; color:black; border:none; padding:12px 20px; border-radius:5px; font-weight:bold; cursor:pointer;'>
+                Get 7% Off DistroKid
+            </button>
+        </a>
     """, unsafe_allow_html=True)
-
-with col_main:
-    st.title("👻 Phantom Trax")
-    st.caption("Professional AI Audio Remix Engine")
-
-    uploaded_file = st.file_uploader("Drop your MP3 here", type=["mp3", "wav"])
-
-    if uploaded_file is not None:
-        temp_filename = "temp_input.mp3"
-        with open(temp_filename, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        
-        st.markdown("### 📊 Track Analysis")
-        with st.container(border=True):
-            col_stats, col_player = st.columns([2, 1])
-            with col_stats:
-                with st.spinner("Processing audio..."):
-                    try:
-                        # LAZY LOAD HERE
-                        librosa, np = get_audio_tools()
-                        
-                        y, sr = librosa.load(temp_filename, duration=60)
-                        clean_duration = int(librosa.get_duration(y=y, sr=sr))
-                        mins, secs = clean_duration // 60, clean_duration % 60
-                        
-                        bpm_text, key_text = "", ""
-                        bpm_val = int(librosa.beat.beat_track(y=y, sr=sr)[0]) if enable_bpm else "---"
-                        if enable_bpm: bpm_text = f"at {bpm_val} BPM"
-
-                        detected_key = estimate_key(y, sr) if enable_key else "---"
-                        if enable_key: key_text = f"in {detected_key}"
-                        
-                        m1, m2, m3 = st.columns(3)
-                        m1.metric("Duration", f"{mins}:{secs:02d}")
-                        m2.metric("BPM", f"{bpm_val}")
-                        m3.metric("Key", detected_key)
-                    except Exception as e:
-                        st.error(f"Analysis failed: {e}")
-                        clean_duration = 30
-            
-            with col_player:
-                st.write("**Preview Input:**")
-                st.audio(uploaded_file, format='audio/mp3')
-
-        st.write("---")
-        default_text = f"Remix {bpm_text} {key_text}, trap style, heavy 808"
-        default_text = " ".join(default_text.split())
-        style_prompt = st.text_input("Describe the new style", default_text)
-
-        generate_clicked = st.button("✨ Generate Remix", type="primary", use_container_width=True)
-
-        if generate_clicked:
-            if use_optimizer:
-                st.session_state.optimized_prompt = "" 
-                open_optimizer_modal(style_prompt)
-            else:
-                st.session_state.run_remix = True
-                st.session_state.optimized_prompt = style_prompt 
-
-        if st.session_state.run_remix:
-            # Lazy load remix engine only when running
-            from remix_engine import start_remix_job
-            
-            final_prompt = st.session_state.optimized_prompt if st.session_state.optimized_prompt else style_prompt
-            st.session_state.run_remix = False 
-            
-            try:
-                st.toast(f"Starting Remix...", icon="🔥")
-                prediction = start_remix_job(temp_filename, final_prompt, clean_duration, temperature, seed)
-                
-                est_time = int((clean_duration * 1.3) + 20)
-                status_text = st.empty()
-                progress_bar = st.progress(0)
-                start_time = time.time()
-                
-                while prediction.status not in ["succeeded", "failed", "canceled"]:
-                    elapsed = int(time.time() - start_time)
-                    remaining = max(0, est_time - elapsed)
-                    r_m, r_s = remaining // 60, remaining % 60
-                    
-                    status_text.markdown(f"### ⏳ Time Remaining: **{r_m}:{r_s:02d}**")
-                    progress_bar.progress(min(int((elapsed / est_time) * 100), 95))
-                    time.sleep(1)
-                    prediction.reload()
-
-                if prediction.status == "succeeded":
-                    status_text.success("✅ Remix Complete!")
-                    progress_bar.progress(100)
-                    remix_url = str(prediction.output)
-                    st.session_state.history.insert(0, {
-                        "prompt": final_prompt, "url": remix_url, "time": time.strftime("%H:%M"), "seed": seed if seed else "Random"
-                    })
-                    st.rerun()
-                else:
-                    st.error(f"❌ Failed: {prediction.status}")
-
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-    if st.session_state.history:
-        st.write("### 📜 Session History")
-        for item in st.session_state.history:
-            with st.container(border=True):
-                h_col1, h_col2 = st.columns([3, 1])
-                with h_col1:
-                    st.markdown(f"**{item['prompt']}**")
-                    st.caption(f"🕒 {item['time']} | 🌱 Seed: {item['seed']}")
-                    st.audio(item['url'])
-                with h_col2:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown(f"[⬇️ Download WAV]({item['url']})")
